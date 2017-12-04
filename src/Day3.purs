@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (log)
+import Control.Monad.Loops (iterateWhile)
 import Control.Monad.State (State, evalState, get, put)
 import Control.MonadPlus (guard)
 import Data.Array as Array
@@ -13,6 +14,7 @@ import Data.Foldable (sum)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int (fromString)
+import Data.Lazy (Lazy)
 import Data.Lens (class Wander, ALens', Fold', IndexedTraversal', Lens', _1, _2, addOver, cloneLens, lens, over, set, to, view, viewOn, (+~), (.~), (^.))
 import Data.Lens.Indexed (iwander)
 import Data.Lens.Internal.Indexed (Indexed(..))
@@ -97,10 +99,6 @@ walk' :: ALens' Pt Int
       -> Tuple (Array Pt) Pt
 walk' l i pt = fanout id (fromMaybe pt <<< Array.last) $ walk l i pt
 
-
-cont :: forall a b c. (b -> c) -> Tuple a b -> c
-cont = map snd <<< second
-
 walkUnfold :: Tuple Int Pt -> Tuple (LL.List Pt) (Tuple Int Pt)
 walkUnfold (Tuple i p) = Tuple (i+1) <$>
                          (over _1 LL.fromFoldable $ walk' (dirLens i) ((i+1)/2) p)
@@ -113,9 +111,9 @@ tileAt i = pathL `LL.index` (i-2)
 
 
 -- Part 2
-
 type Grid = Map Pt Int
 
+initGrid :: Grid
 initGrid = Map.singleton mempty 1
 
 nHood :: Pt -> Array Pt
@@ -128,51 +126,32 @@ nHood (Pt {x,y}) = do
 getNHood :: Pt -> Grid -> Array Int
 getNHood p g = filterMap (\p -> Map.lookup p g) (nHood p)
 
-
-gridActivatePt :: Pt -> Grid -> Grid
-gridActivatePt p g = Map.alter f p g
+gridActivatePt :: Pt -> Grid -> Tuple Int Grid
+gridActivatePt p g = let g' = Map.alter f p g
+                         i' = fromMaybe 0 $ Map.lookup p g'
+                     in Tuple i' g'
   where f (Just x) = Just x
         f Nothing  = Just $ sum (getNHood p g)
 
+stepPath :: State (Tuple (LL.List Pt) Grid) (Maybe Int)
+stepPath = do
+  (Tuple path grid) <- get
+  case LL.uncons path of
+    Nothing -> pure Nothing
+    Just {head, tail} -> do
+      let (Tuple val newGrid) = gridActivatePt head grid
+      put (Tuple tail newGrid)
+      pure $ pure val
 
-gridActivatePt' :: Pt -> Grid -> Tuple Int Grid
-gridActivatePt' p g = let g' = Map.alter f p g
-                          i' = fromMaybe 0 $ Map.lookup p g'
-                      in Tuple i' g'
-  where f (Just x) = Just x
-        f Nothing  = Just $ sum (getNHood p g)
-
-
-walkS :: Pt -> State Grid Int
-walkS p = do
-  grid <- get
-  let newGrid = gridActivatePt' p grid
-  put $ snd newGrid
-  pure $ fst newGrid
+iterPath :: Int -> Maybe Int
+iterPath i = evalState (iterateWhile (pure i >= _) stepPath) (Tuple pathL initGrid)
 
 
-walkS' :: forall f.
-         Traversable f
-      => f Pt
-      -> Grid
-      -> f Int
-walkS' = evalState <<< traverse walkS
-
-
-main :: forall e. Eff _ Unit
+main :: Eff _ Unit
 main = do
-  args <- argv
-  inputPath <- case args `Array.index` 2 of
-    Nothing -> unsafeCrashWith "Provide path to input file as argument"
-    Just p  -> pure p
-  text <- readTextFile UTF8 inputPath
-  pure unit
-  -- let parsed = parseInput text
 
-  -- log "Results part 1:"
-  -- let results1 = doSum $ filterNext $ withNextN 1 parsed
-  -- log $ show results1
+  log "Results part 1:"
+  log $ show $ (\ (Pt {x,y}) -> (abs x) + (abs y)) <$> tileAt 312051
 
-  -- log "Results part 2:"
-  -- let results2 = doSum $ filterNext $ withNextHalf parsed
-  -- log $ show results2
+  log "Results part 2:"
+  log $ show $ iterPath 312051
