@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (log)
+import Control.Monad.State (State, evalState, get, put)
 import Control.MonadPlus (guard)
 import Data.Array as Array
 import Data.Enum (class Enum)
@@ -19,6 +20,7 @@ import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record (prop)
 import Data.List.Lazy as LL
 import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype)
@@ -29,6 +31,7 @@ import Data.Profunctor.Strong (class Strong, fanout, first, second, (&&&))
 import Data.String (toCharArray)
 import Data.String as String
 import Data.Symbol (SProxy(..))
+import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Data.Unfoldable (class Unfoldable, unfoldr)
 import Data.Unfoldable as U
@@ -107,6 +110,53 @@ pathL = LL.concat $ unfoldr (Just <<< walkUnfold) (Tuple 0 mempty)
 
 tileAt :: Int -> Maybe Pt
 tileAt i = pathL `LL.index` (i-2)
+
+
+-- Part 2
+
+type Grid = Map Pt Int
+
+initGrid = Map.singleton mempty 1
+
+nHood :: Pt -> Array Pt
+nHood (Pt {x,y}) = do
+  x' <- [x-1, x, x+1]
+  y' <- [y-1, y, y+1]
+  guard $ x' /= x || y' /= y
+  pure $ Pt {x: x', y: y'}
+
+getNHood :: Pt -> Grid -> Array Int
+getNHood p g = filterMap (\p -> Map.lookup p g) (nHood p)
+
+
+gridActivatePt :: Pt -> Grid -> Grid
+gridActivatePt p g = Map.alter f p g
+  where f (Just x) = Just x
+        f Nothing  = Just $ sum (getNHood p g)
+
+
+gridActivatePt' :: Pt -> Grid -> Tuple Int Grid
+gridActivatePt' p g = let g' = Map.alter f p g
+                          i' = fromMaybe 0 $ Map.lookup p g'
+                      in Tuple i' g'
+  where f (Just x) = Just x
+        f Nothing  = Just $ sum (getNHood p g)
+
+
+walkS :: Pt -> State Grid Int
+walkS p = do
+  grid <- get
+  let newGrid = gridActivatePt' p grid
+  put $ snd newGrid
+  pure $ fst newGrid
+
+
+walkS' :: forall f.
+         Traversable f
+      => f Pt
+      -> Grid
+      -> f Int
+walkS' = evalState <<< traverse walkS
 
 
 main :: forall e. Eff _ Unit
